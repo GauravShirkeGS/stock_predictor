@@ -1,63 +1,52 @@
-from fastapi import FastAPI, Query
-from pydantic import BaseModel
-import pandas as pd
-import pickle
-from datetime import datetime, timedelta
-import os
-import pickle
+# src/api.py
 
-model_path = os.path.join(os.path.dirname(__file__), "..", "model", "rf_candle_predictor.pkl")
-with open(model_path, "rb") as f:
-    model = pickle.load(f)
+from fastapi import FastAPI, HTTPException, Query
+from predict_action import predict_trading_action
+from data_fetcher import fetch_features
+from datetime import datetime as dt
 
-import os
-data_path = os.path.join(os.path.dirname(__file__), "../data/data.csv")
-data = pd.read_csv(os.path.abspath(data_path))
-data['time'] = pd.to_datetime(data['time'])
+app = FastAPI(title="Stock Trading Signal API")
 
-# FastAPI instance
-app = FastAPI()
-
-@app.get("/")
-def root():
-    return {"message": "Welcome to OHLC Predictor API"}
 
 @app.get("/predict")
-def predict_next_candle(input_datetime: str = Query(..., description="Format: YYYY-MM-DD HH:MM")):
+def predict_action(
+    symbol: str = Query(..., example="AAPL"),
+    interval: str = Query(..., example="15min"),
+    datetime_str: str = Query(..., example="2024-06-20 15:30:00")
+):
+    """
+    Predict Buy/Sell/Hold action for a given datetime.
+    """
     try:
-        # Convert input
-        dt = datetime.strptime(input_datetime, "%Y-%m-%d %H:%M")
-
-        # Filter up to that datetime
-        df_filtered = data[data['time'] <= dt].sort_values('time')
-
-        if len(df_filtered) < 2:
-            return {"error": "Not enough data before the given time."}
-
-        prev1 = df_filtered.iloc[-1]
-        prev2 = df_filtered.iloc[-2]
-
-        features = pd.DataFrame([{
-            'open_prev1': prev1['open'],
-            'high_prev1': prev1['high'],
-            'low_prev1': prev1['low'],
-            'close_prev1': prev1['close'],
-            'open_prev2': prev2['open'],
-            'high_prev2': prev2['high'],
-            'low_prev2': prev2['low'],
-            'close_prev2': prev2['close'],
-        }])
-
-        prediction = model.predict(features)[0]
-        next_time = prev1['time'] + timedelta(minutes=15)
-
-        return {
-            "predicted_candle_time": next_time.strftime("%Y-%m-%d %H:%M"),
-            "predicted_open": round(prediction[0], 2),
-            "predicted_high": round(prediction[1], 2),
-            "predicted_low": round(prediction[2], 2),
-            "predicted_close": round(prediction[3], 2),
-        }
-
+        action = predict_trading_action(symbol, interval, datetime_str)
+        return {"symbol": symbol, "interval": interval, "datetime": datetime_str, "action": action}
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/predict/latest")
+def latest_prediction(
+    symbol: str = Query(..., example="AAPL"),
+    interval: str = Query(..., example="15min")
+):
+    """
+    Predict Buy/Sell/Hold action for the latest available data.
+    """
+    try:
+        df = fetch_features(symbol, interval)
+        df = df.dropna()
+        if len(df) < 2:
+            raise ValueError("Not enough data to make a prediction")
+
+        latest_index = df.index[-1]
+        latest_datetime_str = latest_index.strftime("%Y-%m-%d %H:%M:%S")
+
+        action = predict_trading_action(symbol, interval, latest_datetime_str)
+        return {
+            "symbol": symbol,
+            "interval": interval,
+            "latest_datetime": latest_datetime_str,
+            "action": action
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
