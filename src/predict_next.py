@@ -1,42 +1,45 @@
+# src/predict_next.py
+
+from src.data_fetcher import fetch_features
+from src.model_handler import predict_next_candle
 import pandas as pd
-import joblib
+from src.constants import FEATURES_USED
 
-# Load model
-model = joblib.load('../model/rf_candle_predictor.pkl')
 
-# Load data
-df = pd.read_csv('../data/data.csv')
-df['time'] = pd.to_datetime(df['time'])
-df = df.sort_values('time')
+def prepare_features(df):
+    """
+    Prepare features from technical indicator-enhanced dataframe.
+    """
+    # Select only the latest row for prediction
+    latest = df.iloc[-1]
 
-# Get last two candles
-last_two = df.tail(2)
+    # Choose relevant features
+    features = [
+        latest["Open"], latest["High"], latest["Low"], latest["Close"], latest["Volume"],
+        latest["sma_10"], latest["sma_20"], latest["rsi_14"],
+        latest["macd"], latest["macd_signal"],
+        latest["bb_upper"], latest["bb_lower"],
+        latest["volatility"]
+    ]
 
-# Prepare input features
-latest_data = {
-    'open_prev1': last_two.iloc[-1]['open'],
-    'high_prev1': last_two.iloc[-1]['high'],
-    'low_prev1':  last_two.iloc[-1]['low'],
-    'close_prev1': last_two.iloc[-1]['close'],
-    'open_prev2': last_two.iloc[-2]['open'],
-    'high_prev2': last_two.iloc[-2]['high'],
-    'low_prev2':  last_two.iloc[-2]['low'],
-    'close_prev2': last_two.iloc[-2]['close'],
-}
+    return features
 
-# Predict
-X_input = pd.DataFrame([latest_data])
-predicted = model.predict(X_input)[0]
+def get_prediction(symbol="AAPL", interval="15min"):
+    """
+    Get real-time features and predict the next OHLC candle.
+    """
+    df = fetch_features(symbol=symbol, interval=interval)
 
-# Calculate next candle's timestamp
-last_time = df['time'].iloc[-1]
-time_delta = last_time - df['time'].iloc[-2]
-predicted_time = last_time + time_delta
+    if df is None or len(df) < 30:
+        return {"error": "Not enough data to predict"}
 
-# Show result
-print(f"\n📅 Predicted Candle Time: {predicted_time}")
-print("📈 Predicted Next Candle:")
-print(f"Open:  {predicted[0]:.2f}")
-print(f"High:  {predicted[1]:.2f}")
-print(f"Low:   {predicted[2]:.2f}")
-print(f"Close: {predicted[3]:.2f}")
+    features = prepare_features(df)
+    prediction = predict_next_candle(features)
+
+    # Estimate next candle time
+    last_time = pd.to_datetime(df["Date"].iloc[-1])
+    interval_minutes = int(interval.replace("min", "")) if "min" in interval else 1
+    next_time = last_time + pd.Timedelta(minutes=interval_minutes)
+
+    prediction["predicted_candle_time"] = next_time.strftime("%Y-%m-%d %H:%M")
+    return prediction

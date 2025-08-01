@@ -1,38 +1,65 @@
-import os
+from data_fetcher import fetch_features
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-import pickle
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+import joblib
+import os
 
-# Resolve correct path
-base_dir = os.path.dirname(os.path.dirname(__file__))  # Goes one level up from /src
-data_path = os.path.join(base_dir, "data", "data.csv")
+MODEL_PATH = "model/buy_sell_classifier.pkl"
 
-# Load data
-df = pd.read_csv(data_path)
-df['time'] = pd.to_datetime(df['time'])
-df.sort_values('time', inplace=True)
+def generate_labels(df, threshold=0.002):  # ← Add this function
+    """
+    Labels each row as:
+    - 1 for Buy
+    - -1 for Sell
+    - 0 for Hold
+    """
+    labels = []
+    for i in range(len(df) - 1):
+        current_close = df.iloc[i]["Close"]
+        next_close = df.iloc[i + 1]["Close"]
+        change_pct = (next_close - current_close) / current_close
 
-X = []
-y = []
+        if change_pct > threshold:
+            labels.append(1)   # Buy
+        elif change_pct < -threshold:
+            labels.append(-1)  # Sell
+        else:
+            labels.append(0)   # Hold
 
-for i in range(2, len(df)):
-    prev2 = df.iloc[i-2]
-    prev1 = df.iloc[i-1]
-    curr = df.iloc[i]
+    return labels
 
-    X.append([
-        prev2['open'], prev2['high'], prev2['low'], prev2['close'],
-        prev1['open'], prev1['high'], prev1['low'], prev1['close'],
-    ])
-    y.append([curr['open'], curr['high'], curr['low'], curr['close']])
+def prepare_classification_data(df):  # ← Add this too
+    X = []
+    for i in range(len(df) - 1):
+        current = df.iloc[i]
+        features = [
+            current["Open"], current["High"], current["Low"], current["Close"], current["Volume"],
+            current["sma_10"], current["sma_20"], current["rsi_14"],
+            current["macd"], current["macd_signal"],
+            current["bb_upper"], current["bb_lower"],
+            current["volatility"]
+        ]
+        X.append(features)
 
-# Train model
-model = RandomForestRegressor()
-model.fit(X, y)
+    y = generate_labels(df)
+    return np.array(X), np.array(y)
 
-# Save model
-model_path = os.path.join(base_dir, "model", "rf_candle_predictor.pkl")
-with open(model_path, "wb") as f:
-    pickle.dump(model, f)
+def train_classifier(symbol="AAPL", interval="15min"):  # ← New training function
+    print("Fetching data...")
+    df = fetch_features(symbol=symbol, interval=interval)
+    df.dropna(inplace=True)
 
-print("✅ Model trained and saved at:", model_path)
+    print("Preparing data...")
+    X, y = prepare_classification_data(df)
+
+    print("Training classifier...")
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X, y)
+
+    os.makedirs("model", exist_ok=True)
+    joblib.dump(model, MODEL_PATH)
+    print(f"Model saved at {MODEL_PATH}")
+
+if __name__ == "__main__":
+    train_classifier()
