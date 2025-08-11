@@ -2,38 +2,36 @@ import joblib
 import numpy as np
 import os
 
-# Load the model once (avoid reloading each time)
-MODEL_PATH = os.path.join("model", "rf_candle_predictor.pkl")
-model = joblib.load(MODEL_PATH)
+MODEL_PATH = os.path.join("model", "xgb_trading_model.pkl")
+FEATURES_PATH = os.path.join("model", "feature_columns.pkl")
 
-def predict_next_candle(features):
-    """
-    Takes a 1D numpy array of features and returns the predicted OHLC values.
-    """
-    if not isinstance(features, np.ndarray):
-        features = np.array(features).reshape(1, -1)
-    elif len(features.shape) == 1:
-        features = features.reshape(1, -1)
+model = None
+feature_columns = None
 
+def load_model_and_features():
+    """
+    Loads the XGBoost classification model and feature column list.
+    """
+    global model, feature_columns
+
+    if model is None:
+        model = joblib.load(MODEL_PATH)
+
+    if feature_columns is None:
+        feature_columns = joblib.load(FEATURES_PATH)
+
+    return model, feature_columns
+
+def predict_trade_action(features: list):
+    """
+    Predicts Buy/Hold/Sell from feature list using XGBoost classification model.
+    """
+    model, feature_columns = load_model_and_features()
+
+    features = np.array(features).reshape(1, -1)
     prediction = model.predict(features)[0]
 
-    return {
-        "predicted_open": round(prediction[0], 2),
-        "predicted_high": round(prediction[1], 2),
-        "predicted_low": round(prediction[2], 2),
-        "predicted_close": round(prediction[3], 2),
-    }
+    label_map = { 2: "Sell", 0: "Hold", 1: "Buy" }
 
-def predict_trade_action(features):
-    if not isinstance(features, np.ndarray):
-        features = np.array(features).reshape(1, -1)
-    elif len(features.shape) == 1:
-        features = features.reshape(1, -1)
+    return label_map.get(prediction, "Unknown")
 
-    prediction = model.predict(features)[0]
-
-    return {
-        -1: "Sell",
-         0: "Hold",
-         1: "Buy"
-    }[prediction]

@@ -40,17 +40,17 @@ def fetch_stock_data(symbol: str, interval: str, outputsize: int = 1000) -> pd.D
 
     df = pd.DataFrame(data["values"])
     df.rename(columns={
-        "datetime": "Date",
-        "open": "Open",
-        "high": "High",
-        "low": "Low",
-        "close": "Close",
-        "volume": "Volume"
+        "datetime": "date",
+        "open": "open",
+        "high": "high",
+        "low": "low",
+        "close": "close",
+        "volume": "volume"
     }, inplace=True)
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date")
 
-    numeric_cols = ["Open", "High", "Low", "Close", "Volume"]
+    numeric_cols = ["open", "high", "low", "close", "volume"]
     df[numeric_cols] = df[numeric_cols].astype(float)
 
     return df
@@ -87,29 +87,37 @@ def fetch_ohlc_data(symbol: str, interval: str, outputsize=1000):
     return df
 
 
-def fetch_features(symbol: str, interval: str, lookback: int = 1000) -> pd.DataFrame:
-    df = fetch_ohlc_data(symbol, interval, lookback)
+import pandas as pd
+import requests
+import os
 
-    # ✅ Rename Date to datetime and convert to datetime type
-    if "Date" in df.columns:
-        df.rename(columns={"Date": "datetime"}, inplace=True)
-    df["datetime"] = pd.to_datetime(df["datetime"])
+TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "your_api_key_here")
 
-    # Add TA indicators
-    df["sma_10"] = ta.sma(df["Close"], length=10)
-    df["sma_20"] = ta.sma(df["Close"], length=20)
-    df["rsi_14"] = ta.rsi(df["Close"], length=14)
 
-    macd = ta.macd(df["Close"])
+def fetch_features(symbol, interval="15min", lookback=300):
+    df = fetch_stock_data(symbol, interval, lookback)
+
+    # Basic technical indicators
+    df["sma_10"] = df["close"].rolling(10).mean()
+    df["sma_20"] = df["close"].rolling(20).mean()
+    df["sma_50"] = df["close"].rolling(50).mean()
+
+    df["rsi"] = ta.rsi(df["close"], length=14)
+    macd = ta.macd(df["close"])
     df["macd"] = macd["MACD_12_26_9"]
     df["macd_signal"] = macd["MACDs_12_26_9"]
+    df["macd_diff"] = df["macd"] - df["macd_signal"]
 
-    bb = ta.bbands(df["Close"], length=20)
+    bb = ta.bbands(df["close"], length=20)
     df["bb_upper"] = bb["BBU_20_2.0"]
     df["bb_lower"] = bb["BBL_20_2.0"]
+    df["bb_middle"] = (df["bb_upper"] + df["bb_lower"]) / 2
 
-    df["volatility"] = df["Close"].rolling(window=10).std()
+    df["volatility"] = df["close"].rolling(10).std()
+    df["vol_pct_change"] = df["volume"].pct_change()
+
+    # Derived features
+    df["rsi_cross_50"] = (df["rsi"] > 50).astype(int)
 
     df.dropna(inplace=True)
-
     return df

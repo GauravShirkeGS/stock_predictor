@@ -1,8 +1,4 @@
-# src/constants.py
-FEATURES_USED = [
-    "Open", "High", "Low", "Close", "Volume",
-    "sma_10", "sma_20", "rsi_14",
-    "macd", "macd_signal",
-    "bb_upper", "bb_lower",
-    "volatility"
+FEATURE_COLUMNS = [
+    "sma_10", "sma_50", "rsi", "macd", "macd_signal", "macd_diff",
+    "bb_upper", "bb_middle", "bb_lower", "volatility", "vol_pct_change", "rsi_cross_50"
 ]
