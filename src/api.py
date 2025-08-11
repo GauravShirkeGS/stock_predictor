@@ -1,8 +1,10 @@
 # src/api.py
 
 from fastapi import FastAPI, HTTPException, Query
-from predict_action import predict_trading_action
-from data_fetcher import fetch_features
+from src.predict_action import predict_trading_action
+from src.data_fetcher import fetch_features
+import  numpy as np
+import pandas as pd
 from datetime import datetime as dt
 
 app = FastAPI(title="Stock Trading Signal API")
@@ -10,24 +12,31 @@ app = FastAPI(title="Stock Trading Signal API")
 
 @app.get("/predict")
 def predict_action(
-    symbol: str = Query(..., example="AAPL"),
-    interval: str = Query(..., example="15min"),
-    datetime_str: str = Query(..., example="2024-06-20 15:30:00")
+    symbol: str = Query(..., description="Stock symbol, e.g., AAPL"),
+    interval: str = Query(..., description="Candle interval, e.g., 15min"),
+    datetime_str: str = Query(..., description="Datetime in format YYYY-MM-DD HH:MM:SS")
 ):
     """
-    Predict Buy/Sell/Hold action for a given datetime.
+    Predict Buy/Sell/Hold action for a specific timestamp.
     """
     try:
         action = predict_trading_action(symbol, interval, datetime_str)
-        return {"symbol": symbol, "interval": interval, "datetime": datetime_str, "action": action}
+        return {
+            "symbol": symbol,
+            "interval": interval,
+            "datetime": datetime_str,
+            "action": action
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=422, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 @app.get("/predict/latest")
 def latest_prediction(
-    symbol: str = Query(..., example="AAPL"),
-    interval: str = Query(..., example="15min")
+    symbol: str = Query(..., description="Stock symbol, e.g., AAPL"),
+    interval: str = Query(..., description="Candle interval, e.g., 15min")
 ):
     """
     Predict Buy/Sell/Hold action for the latest available data.
@@ -35,18 +44,23 @@ def latest_prediction(
     try:
         df = fetch_features(symbol, interval)
         df = df.dropna()
-        if len(df) < 2:
-            raise ValueError("Not enough data to make a prediction")
 
-        latest_index = df.index[-1]
-        latest_datetime_str = latest_index.strftime("%Y-%m-%d %H:%M:%S")
+        if df is None or df.empty or len(df) < 2:
+            raise ValueError("Not enough valid data to make a prediction.")
 
+        # Convert integer timestamp to datetime (if it's not already)
+        latest_datetime_str = df.iloc[-1]["date"]
+
+        print("step-1")
         action = predict_trading_action(symbol, interval, latest_datetime_str)
+        print("step-2")
         return {
             "symbol": symbol,
             "interval": interval,
             "latest_datetime": latest_datetime_str,
             "action": action
         }
+    except ValueError as ve:
+        raise HTTPException(status_code=422, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")

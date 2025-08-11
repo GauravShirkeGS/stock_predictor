@@ -1,65 +1,42 @@
-from data_fetcher import fetch_features
 import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 import joblib
+from xgboost import XGBClassifier
+from data_fetcher import fetch_stock_data
+from feature_engineering import add_technical_indicators, add_labels
+from config import MODEL_PATH
 import os
 
-MODEL_PATH = "model/buy_sell_classifier.pkl"
+def train_model():
+    print("🔄 Fetching and preparing data...")
 
-def generate_labels(df, threshold=0.002):  # ← Add this function
-    """
-    Labels each row as:
-    - 1 for Buy
-    - -1 for Sell
-    - 0 for Hold
-    """
-    labels = []
-    for i in range(len(df) - 1):
-        current_close = df.iloc[i]["Close"]
-        next_close = df.iloc[i + 1]["Close"]
-        change_pct = (next_close - current_close) / current_close
+    # 1. Fetch raw data
+    df = fetch_stock_data("AAPL", interval="1h")  # Train on AAPL
+    df.columns = [col.lower() for col in df.columns]  # Make all columns lowercase
 
-        if change_pct > threshold:
-            labels.append(1)   # Buy
-        elif change_pct < -threshold:
-            labels.append(-1)  # Sell
-        else:
-            labels.append(0)   # Hold
-
-    return labels
-
-def prepare_classification_data(df):  # ← Add this too
-    X = []
-    for i in range(len(df) - 1):
-        current = df.iloc[i]
-        features = [
-            current["Open"], current["High"], current["Low"], current["Close"], current["Volume"],
-            current["sma_10"], current["sma_20"], current["rsi_14"],
-            current["macd"], current["macd_signal"],
-            current["bb_upper"], current["bb_lower"],
-            current["volatility"]
-        ]
-        X.append(features)
-
-    y = generate_labels(df)
-    return np.array(X), np.array(y)
-
-def train_classifier(symbol="AAPL", interval="15min"):  # ← New training function
-    print("Fetching data...")
-    df = fetch_features(symbol=symbol, interval=interval)
+    # 2. Add indicators and labels
+    df = add_technical_indicators(df)
+    df = add_labels(df, future_window=5, threshold_buy=0.02, threshold_sell=-0.02)
     df.dropna(inplace=True)
 
-    print("Preparing data...")
-    X, y = prepare_classification_data(df)
+    # 3. Features & Labels
+    feature_cols = [col for col in df.columns if col not in ['label','Label', 'datetime', 'date', 'symbol']]
+    X = df[feature_cols]
+    y = df["Label"]
+    print(df['Label'].value_counts(normalize=True) * 100)
 
-    print("Training classifier...")
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    print("📊 Training data shape:", X.shape)
+
+    # 4. Train model
+    model = XGBClassifier(use_label_encoder=False, eval_metric='mlogloss')
     model.fit(X, y)
 
-    os.makedirs("model", exist_ok=True)
+    # 5. Save model and features
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     joblib.dump(model, MODEL_PATH)
-    print(f"Model saved at {MODEL_PATH}")
+    joblib.dump(feature_cols, "model/feature_columns.pkl")
+
+    print("✅ Model trained and saved.")
+    print("📁 Features used:", feature_cols)
 
 if __name__ == "__main__":
-    train_classifier()
+    train_model()
